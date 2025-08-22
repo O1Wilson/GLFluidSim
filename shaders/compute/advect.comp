@@ -3,6 +3,11 @@ layout(local_size_x = 16, local_size_y = 16) in;
 layout(r32f, binding = 0) uniform image2D dst;
 
 void main() {
-	ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
-	imageStore(dst, gid, vec4(0.2, 0.7, 0.4, 0.9));
+	ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
+	int N = imageSize(dst).x;
+
+	if (coords.x >= N || coords.y >= N) return;
+
+	float value = float(coords.x) / float(N);
+	imageStore(dst, coords, vec4(value, 0.0, 0.0, 1.0));
 }
