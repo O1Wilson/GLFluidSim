@@ -1,6 +1,10 @@
 #version 460 core
 layout(local_size_x = 16, local_size_y = 16) in;
-layout(r32f, binding = 0) uniform image2D dst;
+layout(r32f, binding = 0) uniform writeonly image2D dst;
+layout(r32f, binding = 1) uniform readonly image2D src;
+layout(r32f, binding = 2) uniform readonly image2D vel;
+
+uniform float dt0;
 
 void main() {
 	ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
@@ -8,6 +12,13 @@ void main() {
 
 	if (coords.x >= N || coords.y >= N) return;
 
-	float value = float(coords.x) / float(N);
-	imageStore(dst, coords, vec4(value, 0.0, 0.0, 1.0));
+	vec2 velVal = imageLoad(vel, coords).rg;
+
+	vec2 pos = vec2(coords) - dt0 * velVal;
+	pos = clamp(pos, vec2(0.5), vec2(N - 1.5));
+
+	ivec2 ipos = ivec2(round(pos));
+	float sample = imageLoad(src, ipos).r
+
+	imageStore(dst, coords, vec4(sample, 0.0, 0.0, 1.0));
 }
