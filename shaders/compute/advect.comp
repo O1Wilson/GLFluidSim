@@ -6,6 +6,33 @@ layout(r32f, binding = 2) uniform readonly image2D vel;
 
 uniform float dt0;
 
+float cubicInterpolate(float p0, float p1, float p2, float p3, float t) {
+	float a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+    float b =  p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+    float c = -0.5 * p0 + 0.5 * p2;
+    float d =  p1;
+    return ((a * t + b) * t + c) * t + d;
+}
+
+float bicubicSample(image2D src, vec2 pos, int N) {
+	ivec2 ipos = ivec2(floor(pos));
+	vec2 f = fract(pos);
+
+	float arr[4];
+
+	for (int m = -1; m <= 2; m++) {
+		float row[4];
+		for (int n = -1; n <= 2; n++) {
+			int xi = clamp(ipos.x + n, 0, N-1);
+			int yi = clamp(ipos.y + m, 0, N-1);
+			row[n+1] = imageLoad(src, ivec2(xi, yi)).r;
+		}
+		arr[m+1] = cubic(row[0], row[1], row[2], row[3], f.x);
+	}
+	
+	return cubic(arr[0], arr[1], arr[2], arr[3], f.y);
+}
+
 void main() {
 	ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
 	int N = imageSize(dst).x;
@@ -17,8 +44,19 @@ void main() {
 	vec2 pos = vec2(coords) - dt0 * velVal;
 	pos = clamp(pos, vec2(0.5), vec2(N - 1.5));
 
-	ivec2 ipos = ivec2(round(pos));
-	float sample = imageLoad(src, ipos).r
+	ivec2 i0 = ivec2(floor(pos));
+	ivec2 i1 = i0 + ivec2(1, 0);
+	ivec2 j0 = i0 + ivec2(0, 1);
+	ivec2 j1 = i0 + ivec2(1, 1);
 
+	vec2 f = fract(pos);
+
+	float d00 = imageLoad(src, i0).r;
+	float d10 = imageLoad(src, i1).r;
+	float d01 = imageLoad(src, j0).r;
+	float d11 = imageLoad(src, j1).r;
+
+	// float sample = mix(	mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
+	float sample = bicubicSample(src, pos, N);
 	imageStore(dst, coords, vec4(sample, 0.0, 0.0, 1.0));
 }
