@@ -24,6 +24,7 @@ static float dt = 0.016f;
 
 static GLuint quadVAO = 0, quadVBO = 0;
 static GLuint densityTex = 0;
+static GLuint advectTex;
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 static void processInput(GLFWwindow* window);
@@ -61,13 +62,13 @@ int main() {
     glDisable(GL_DEPTH_TEST);
 
     Shader screenShader({
-        {"shaders/framebuffer.vs", GL_VERTEX_SHADER},
-        {"shaders/framebuffer.frag", GL_FRAGMENT_SHADER}
+        {"shaders/vertex/framebuffer.vs", GL_VERTEX_SHADER},
+        {"shaders/fragment/framebuffer.frag", GL_FRAGMENT_SHADER}
     });
 
-    /*Shader computeShader({
-        {"shaders/my_compute.cs", GL_COMPUTE_SHADER}
-    });*/
+    Shader advectShader({
+        {"shaders/compute/advect.comp", GL_COMPUTE_SHADER}
+    });
 
     screenShader.use();
     screenShader.setInt("screenTexture", 0);
@@ -79,6 +80,19 @@ int main() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glGenTextures(1, &advectTex);
+    glBindTexture(GL_TEXTURE_2D, advectTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, N, N, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    advectShader.use();
+    glBindImageTexture(0, advectTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+    glDispatchCompute(N / 16, N / 16, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
     double lastTime = glfwGetTime();
 
@@ -100,7 +114,7 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT);
         screenShader.use();
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, densityTex);
+        glBindTexture(GL_TEXTURE_2D, advectTex);
         glBindVertexArray(quadVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
 

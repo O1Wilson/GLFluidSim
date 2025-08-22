@@ -16,6 +16,15 @@
     <Filter Include="Source Files\Shaders">
       <UniqueIdentifier>{43349ed3-79cc-404d-854e-1655a77d214e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Shaders\Compute">
+      <UniqueIdentifier>{565fd2e8-1d4f-4c7f-9a11-2b1abe455085}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Shaders\Fragment">
+      <UniqueIdentifier>{817bc38f-84fd-482e-8686-22c99efc5cd5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Shaders\Vertex">
+      <UniqueIdentifier>{de3f6304-dcdb-4b1e-aba3-2c25635417be}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\FluidSim.cpp">
@@ -31,11 +40,14 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\framebuffer.frag">
-      <Filter>Source Files\Shaders</Filter>
+    <None Include="shaders\vertex\framebuffer.vs">
+      <Filter>Source Files\Shaders\Vertex</Filter>
     </None>
-    <None Include="shaders\framebuffer.vs">
-      <Filter>Source Files\Shaders</Filter>
+    <None Include="shaders\fragment\framebuffer.frag">
+      <Filter>Source Files\Shaders\Fragment</Filter>
+    </None>
+    <None Include="shaders\compute\advect.comp">
+      <Filter>Source Files\Shaders\Compute</Filter>
     </None>
   </ItemGroup>
 </Project>
