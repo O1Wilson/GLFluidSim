@@ -2,67 +2,33 @@
 #define SHADER_H
 
 #include <glad/glad.h>
-
 #include <string>
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <vector>
 
 class Shader {
 public:
 	unsigned int ID;
 
-	Shader(const char* vertexPath, const char* fragmentPath) {
-		std::string vertexCode;
-		std::string fragmentCode;
-		std::ifstream vShaderFile;
-		std::ifstream fShaderFile;
-
-		vShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-		fShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-		try {
-			vShaderFile.open(vertexPath);
-			fShaderFile.open(fragmentPath);
-			std::stringstream vShaderStream, fShaderStream;
-
-			vShaderStream << vShaderFile.rdbuf();
-			fShaderStream << fShaderFile.rdbuf();
-
-			vShaderFile.close();
-			fShaderFile.close();
-
-			vertexCode = vShaderStream.str();
-			fragmentCode = fShaderStream.str();
-		}
-		catch (std::ifstream::failure e) {
-			std::cout << "ERROR::SHADER::FILE_NOT_SUCCESFULLY_READ" << std::endl;
-		}
-		const char* vShaderCode = vertexCode.c_str();
-		const char* fShaderCode = fragmentCode.c_str();
-
-		unsigned int vertex, fragment;
-
-		// vertex shader
-		vertex = glCreateShader(GL_VERTEX_SHADER);
-		glShaderSource(vertex, 1, &vShaderCode, NULL);
-		glCompileShader(vertex);
-		checkCompileErrors(vertex, "VERTEX");
-
-		// fragment Shader
-		fragment = glCreateShader(GL_FRAGMENT_SHADER);
-		glShaderSource(fragment, 1, &fShaderCode, NULL);
-		glCompileShader(fragment);
-		checkCompileErrors(fragment, "FRAGMENT");
-
-		// shader Program
+	Shader(std::vector<std::pair<const char*, unsigned int>> shaders) {
 		ID = glCreateProgram();
-		glAttachShader(ID, vertex);
-		glAttachShader(ID, fragment);
+		std::vector<unsigned int> shaderIDs;
+
+		for (const auto& shaderData : shaders) {
+			unsigned int shaderID = createAndCompileShader(shaderData.first, shaderData.second);
+			glAttachShader(ID, shaderID);
+			shaderIDs.push_back(shaderID);
+		}
+
 		glLinkProgram(ID);
 		checkCompileErrors(ID, "PROGRAM");
 
-		glDeleteShader(vertex);
-		glDeleteShader(fragment);
+		for (unsigned int shaderID : shaderIDs) {
+			glDetachShader(ID, shaderID);
+			glDeleteShader(shaderID);
+		}
 	}
 
 	void use() {
@@ -80,6 +46,40 @@ public:
 	}
 	void setVec2(const std::string& name, float x, float y) const {
 		glUniform2f(glGetUniformLocation(ID, name.c_str()), x, y);
+	}
+
+private:
+	unsigned int createAndCompileShader(const char* shaderPath, unsigned int shaderType) {
+		std::string shaderCode;
+		std::ifstream shaderFile;
+		shaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+		try {
+			shaderFile.open(shaderPath);
+			std::stringstream shaderStream;
+			shaderStream << shaderFile.rdbuf();
+			shaderFile.close();
+			shaderCode = shaderStream.str();
+		}
+		catch (std::ifstream::failure e) {
+			std::cout << "ERROR::SHADER::FILE_NOT_SUCCESFULLY_READ: " << shaderPath << std::endl;
+		}
+		const char* sShaderCode = shaderCode.c_str();
+
+		// shader compilation happens here
+		unsigned int shaderID = glCreateShader(shaderType);
+		glShaderSource(shaderID, 1, &sShaderCode, NULL);
+		glCompileShader(shaderID);
+
+		std::string type;
+		switch (shaderType) {
+			case GL_VERTEX_SHADER: type = "VERTEX"; break;
+			case GL_FRAGMENT_SHADER: type = "FRAGMENT"; break;
+			case GL_COMPUTE_SHADER: type = "COMPUTE"; break;
+			default: type = "UNKOWN"; break;
+		}
+		checkCompileErrors(shaderID, type);
+
+		return shaderID;
 	}
 
 private:

@@ -47,7 +47,7 @@ static InterpMode interpMode = BILINEAR;
 int main() {
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
@@ -60,7 +60,15 @@ int main() {
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cout << "Failed to init GLAD\n"; return -1; }
     glDisable(GL_DEPTH_TEST);
 
-    Shader screenShader("shaders/framebuffer.vs", "shaders/framebuffer.frag");
+    Shader screenShader({
+        {"shaders/framebuffer.vs", GL_VERTEX_SHADER},
+        {"shaders/framebuffer.frag", GL_FRAGMENT_SHADER}
+    });
+
+    /*Shader computeShader({
+        {"shaders/my_compute.cs", GL_COMPUTE_SHADER}
+    });*/
+
     screenShader.use();
     screenShader.setInt("screenTexture", 0);
 
