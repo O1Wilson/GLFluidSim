@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 
+/* -------{Simulation Constants and Globals}-------- */
+
 static const unsigned int SCR_WIDTH = 800;
 static const unsigned int SCR_HEIGHT = 600;
 
@@ -22,7 +24,7 @@ static std::vector<float> u(SIZE), v(SIZE);
 static std::vector<float> u_prev(SIZE), v_prev(SIZE);
 static std::vector<float> dens(SIZE), dens_prev(SIZE);
 
-static float diff = 0.0f;
+static float diff = 0.0001f;
 static float visc = 0.0001f;
 static float dt = 0.016f;
 
@@ -32,130 +34,31 @@ enum InterpMode { BILINEAR = 0, BICUBIC = 1 };
 static InterpMode interpMode = BILINEAR;
 
 static GLuint quadVAO = 0, quadVBO = 0;
-static GLuint densityTex = 0;
 static GLuint advectTex, densitySimTex, velTex;
 
-static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
-static void processInput(GLFWwindow* window);
-static void set_bnd(int N, int b, float* x);
-static void add_source(int N, float* x, const float* s, float dt);
-static void lin_solve(int N, int b, float* x, const float* x0, float a, float c);
-static void diffuse(int N, int b, float* x, const float* x0, float diff, float dt);
-static void runAdvectCompute(Shader& fluidShader, GLuint dstTex, GLuint srcTex, GLuint velTex, float dt, InterpMode interpMode, int N);
-static void downloadField(GLuint tex, float* dst);
-static void project(int N, float* u, float* v, float* p, float* div);
-static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc, float dt);
-static void dens_step(int N, float* x, float* x0, float* u, float* v, float diff, float dt);
 static void uploadVelocityTexture(GLuint tex, const float* u, const float* v);
 static void uploadDensitySimTexture(GLuint tex, const float* density);
-static void uploadDensityTexture(GLuint tex, const float* density);
-static void fluidStart();
-static void setupQuad(GLuint& vao, GLuint& vbo);
 
 inline int IX(int i, int j) { return i + (N + 2) * j; }
 
-int main() {
-    glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "2D Fluid Sim", nullptr, nullptr);
-    if (!window) { std::cout << "Failed to create GLFW window\n"; glfwTerminate(); return -1; }
-    glfwMakeContextCurrent(window);
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+GLuint createTexture2D(int width, int height, GLint internalFormat, GLenum format, GLenum type, GLint minFilter = GL_NEAREST, 
+    GLint magFilter = GL_NEAREST, GLint wrapS = GL_CLAMP_TO_EDGE, GLint wrapT = GL_CLAMP_TO_EDGE, const void* data = nullptr) 
+{
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cout << "Failed to init GLAD\n"; return -1; }
-    glDisable(GL_DEPTH_TEST);
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, data);
 
-    Shader screenShader({
-        {"shaders/vertex/framebuffer.vs", GL_VERTEX_SHADER},
-        {"shaders/fragment/framebuffer.frag", GL_FRAGMENT_SHADER}
-    });
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT);
 
-    Shader fluidShader({
-        {"shaders/compute/fluidsim.comp", GL_COMPUTE_SHADER}
-    });
-    fluidShaderPtr = &fluidShader;
-
-    screenShader.use();
-    screenShader.setInt("screenTexture", 0);
-
-    setupQuad(quadVAO, quadVBO);
-
-    glGenTextures(1, &densityTex);
-    glBindTexture(GL_TEXTURE_2D, densityTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glGenTextures(1, &advectTex);
-    glBindTexture(GL_TEXTURE_2D, advectTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, N, N, 0, GL_RED, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glGenTextures(1, &densitySimTex);
-    glBindTexture(GL_TEXTURE_2D, densitySimTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, N, N, 0, GL_RED, GL_FLOAT, nullptr);
-
-    glGenTextures(1, &velTex);
-    glBindTexture(GL_TEXTURE_2D, velTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, N, N, 0, GL_RG, GL_FLOAT, nullptr);
-
-    double lastTime = glfwGetTime();
-
-    while (!glfwWindowShouldClose(window)) {
-        processInput(window);
-
-        double now = glfwGetTime();
-        dt = float(std::min(0.1, now - lastTime));
-        lastTime = now;
-
-        fluidStart();
-
-        vel_step(N, u.data(), v.data(), u_prev.data(), v_prev.data(), visc, dt);
-        dens_step(N, dens.data(), dens_prev.data(), u.data(), v.data(), diff, dt);
-
-        uploadDensityTexture(densityTex, dens.data());
-        uploadVelocityTexture(velTex, u.data(), v.data());
-        uploadDensitySimTexture(densitySimTex, dens.data());
-
-        fluidShader.use();
-        glBindImageTexture(0, advectTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-        glBindImageTexture(1, densitySimTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
-        glBindImageTexture(2, velTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
-        fluidShader.setFloat("dt0", dt * N);
-        fluidShader.setInt("interpMode", interpMode);
-        glDispatchCompute(gx, gy, 1);
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-        glClearColor(0.05f, 0.06f, 0.07f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        screenShader.use();
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, advectTex);
-        glBindVertexArray(quadVAO);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
-
-    glDeleteVertexArrays(1, &quadVAO);
-    glDeleteBuffers(1, &quadVBO);
-    glDeleteTextures(1, &densityTex);
-    glDeleteTextures(1, &advectTex);
-    glDeleteTextures(1, &densitySimTex);
-    glDeleteTextures(1, &velTex);
-
-    glfwTerminate();
-    return 0;
+    return tex;
 }
+
+/* -------{GLFW Input + Window Callbacks}-------- */
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
@@ -177,6 +80,34 @@ static void processInput(GLFWwindow* window) {
         std::fill(dens_prev.begin(), dens_prev.end(), 0.0f);
     }
 }
+
+/* -------{Math / Fluid Simulation Functions}-------- */
+
+/* ------------------------------------------------------------------------
+   {Variable Dictionary}
+   Based on Jos Stam's "Stable Fluids" (1999)
+
+   u      : x-component of velocity field (horizontal velocity)
+   v      : y-component of velocity field (vertical velocity)
+   u0     : previous step's x-component velocity (temporary buffer)
+   v0     : previous step's y-component velocity (temporary buffer)
+
+   dens   : density field (dye concentration)
+   dens0  : previous step’s density field (temporary buffer)
+
+   p      : pressure field
+   div    : divergence field
+
+   N      : grid resolution (size is N x N cells)
+   SIZE   : total number of cells including boundary
+   IX(i,j): macro function mapping 2D grid coordinates to 1D index
+
+   dt     : timestep (step size)
+   diff   : diffusion rate
+   visc   : viscosity
+   b      : flag for boundary type  (0 = scalar, 1 = u-component, 2 = v-component)
+
+   ------------------------------------------------------------------------ */
 
 static void set_bnd(int N, int b, float* x) {
     for (int i = 1; i <= N; i++) {
@@ -213,14 +144,14 @@ static void diffuse(int N, int b, float* x, const float* x0, float diff, float d
     lin_solve(N, b, x, x0, a, 1.0f + 4.0f * a);
 }
 
-static void runAdvectCompute(Shader& fluidShader, GLuint dstTex, GLuint srcTex, GLuint velTex, float dt, InterpMode interpMode, int N) {
-    fluidShader.use();
-    fluidShader.setFloat("dt0", dt * N);
-    fluidShader.setInt("interpMode", interpMode);
+void fluidCompute(Shader& shader, GLuint dst, GLuint src, GLuint vel, float dt, int interpMode, int N) {
+    shader.use();
+    shader.setFloat("dt0", dt * N);
+    shader.setInt("interpMode", interpMode);
 
-    glBindImageTexture(0, dstTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-    glBindImageTexture(1, srcTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
-    glBindImageTexture(2, velTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
+    glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+    glBindImageTexture(1, src, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
+    glBindImageTexture(2, vel, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
 
     glDispatchCompute(gx, gy, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -276,12 +207,12 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
 
     uploadVelocityTexture(velTex, u0, v0);
     uploadDensitySimTexture(densitySimTex, u);
-    runAdvectCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
+    fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
     downloadField(advectTex, u);
 
     uploadVelocityTexture(velTex, u0, v0);
     uploadDensitySimTexture(densitySimTex, v);
-    runAdvectCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
+    fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
     downloadField(advectTex, v);
 
     project(N, u, v, u0, v0);
@@ -298,12 +229,13 @@ static void dens_step(int N, float* x, float* x0, float* u, float* v, float diff
 
     uploadDensitySimTexture(densitySimTex, x0);
     uploadVelocityTexture(velTex, u, v);
-    runAdvectCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
+    fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
     downloadField(advectTex, x);
 
     std::fill(x0, x0 + SIZE, 0.0f);
 }
 
+/* -------{Temporary GPU Upload Utilities}-------- */
 
 static void uploadVelocityTexture(GLuint tex, const float* u, const float* v) {
     std::vector<glm::vec2> buffer(N * N);
@@ -314,10 +246,6 @@ static void uploadVelocityTexture(GLuint tex, const float* u, const float* v) {
     }
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, N, N, 0, GL_RG, GL_FLOAT, buffer.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
 static void uploadDensitySimTexture(GLuint tex, const float* density) {
@@ -329,28 +257,9 @@ static void uploadDensitySimTexture(GLuint tex, const float* density) {
     }
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, N, N, 0, GL_RED, GL_FLOAT, buffer.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
-static void uploadDensityTexture(GLuint tex, const float* density) {
-    std::vector<unsigned char> buffer(N * N);
-    for (int j = 1; j <= N; j++) {
-        for (int i = 1; i <= N; i++) {
-            float d = std::min(1.0f, std::max(0.0f, density[IX(i, j)]));
-            buffer[(j - 1) * N + (i - 1)] = static_cast<unsigned char>(d * 255.0f);
-        }
-    }
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glBindTexture(GL_TEXTURE_2D, densityTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, buffer.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-}
+/* -------{Simulation Setup / Fluid Spawn}-------- */
 
 static void fluidStart() {
     int i1 = N / 3;
@@ -365,6 +274,8 @@ static void fluidStart() {
     dens_prev[IX(i2, j2)] = 200.0f;
     v_prev[IX(i2, j2)] = 500.0f;
 }
+
+/* -------{Rendering Setup}-------- */
 
 static void setupQuad(GLuint& vao, GLuint& vbo) {
     float quadVertices[] = {
@@ -387,4 +298,85 @@ static void setupQuad(GLuint& vao, GLuint& vbo) {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
+}
+
+void renderFrame(Shader& shader, GLuint tex, GLuint vao) {
+    glClearColor(0.05f, 0.06f, 0.07f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    shader.use();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
+/* -------{Program Initializion and Render Loop}-------- */
+
+int main() {
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "2D Fluid Sim", nullptr, nullptr);
+    if (!window) { std::cout << "Failed to create GLFW window\n"; glfwTerminate(); return -1; }
+    glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cout << "Failed to init GLAD\n"; return -1; }
+
+    Shader screenShader({
+        {"shaders/vertex/framebuffer.vs", GL_VERTEX_SHADER},
+        {"shaders/fragment/framebuffer.frag", GL_FRAGMENT_SHADER}
+    });
+
+    Shader fluidShader({
+        {"shaders/compute/advect.comp", GL_COMPUTE_SHADER}
+    });
+    fluidShaderPtr = &fluidShader;
+
+    screenShader.use();
+    screenShader.setInt("screenTexture", 0);
+
+    setupQuad(quadVAO, quadVBO);
+
+    advectTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    densitySimTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    velTex = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+
+    double lastTime = glfwGetTime();
+
+    while (!glfwWindowShouldClose(window)) {
+        processInput(window);
+
+        double now = glfwGetTime();
+        dt = float(std::min(0.1, now - lastTime));
+        lastTime = now;
+
+        fluidStart();
+
+        vel_step(N, u.data(), v.data(), u_prev.data(), v_prev.data(), visc, dt);
+        dens_step(N, dens.data(), dens_prev.data(), u.data(), v.data(), diff, dt);
+
+        uploadVelocityTexture(velTex, u.data(), v.data());
+        uploadDensitySimTexture(densitySimTex, dens.data());
+
+        fluidCompute(fluidShader, advectTex, densitySimTex, velTex, dt, interpMode, N);
+        renderFrame(screenShader, advectTex, quadVAO);
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteBuffers(1, &quadVBO);
+    glDeleteTextures(1, &advectTex);
+    glDeleteTextures(1, &densitySimTex);
+    glDeleteTextures(1, &velTex);
+
+    glfwTerminate();
+    return 0;
 }

@@ -46,7 +46,7 @@
     <None Include="shaders\fragment\framebuffer.frag">
       <Filter>Source Files\Shaders\Fragment</Filter>
     </None>
-    <None Include="shaders\compute\fluidsim.comp">
+    <None Include="shaders\compute\advect.comp">
       <Filter>Source Files\Shaders\Compute</Filter>
     </None>
   </ItemGroup>
