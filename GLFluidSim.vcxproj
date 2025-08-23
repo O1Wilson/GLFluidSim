@@ -140,7 +140,7 @@
     <ClInclude Include="include\shader.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\compute\advect.comp" />
+    <None Include="shaders\compute\fluidsim.comp" />
     <None Include="shaders\fragment\framebuffer.frag" />
     <None Include="shaders\vertex\framebuffer.vs" />
   </ItemGroup>

@@ -2,9 +2,12 @@
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(r32f, binding = 0) uniform writeonly image2D dst;
 layout(r32f, binding = 1) uniform readonly image2D src;
-layout(r32f, binding = 2) uniform readonly image2D vel;
+layout(rg32f, binding = 2) uniform readonly image2D vel;
 
 uniform float dt0;
+uniform int interpMode;
+
+// -------------------------Functions-------------------------
 
 float cubicInterpolate(float p0, float p1, float p2, float p3, float t) {
 	float a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
@@ -14,7 +17,7 @@ float cubicInterpolate(float p0, float p1, float p2, float p3, float t) {
     return ((a * t + b) * t + c) * t + d;
 }
 
-float bicubicSample(image2D src, vec2 pos, int N) {
+float bicubicSample(vec2 pos, int N) {
 	ivec2 ipos = ivec2(floor(pos));
 	vec2 f = fract(pos);
 
@@ -27,10 +30,10 @@ float bicubicSample(image2D src, vec2 pos, int N) {
 			int yi = clamp(ipos.y + m, 0, N-1);
 			row[n+1] = imageLoad(src, ivec2(xi, yi)).r;
 		}
-		arr[m+1] = cubic(row[0], row[1], row[2], row[3], f.x);
+		arr[m+1] = cubicInterpolate(row[0], row[1], row[2], row[3], f.x);
 	}
 	
-	return cubic(arr[0], arr[1], arr[2], arr[3], f.y);
+	return cubicInterpolate(arr[0], arr[1], arr[2], arr[3], f.y);
 }
 
 void main() {
@@ -40,23 +43,28 @@ void main() {
 	if (coords.x >= N || coords.y >= N) return;
 
 	vec2 velVal = imageLoad(vel, coords).rg;
-
 	vec2 pos = vec2(coords) - dt0 * velVal;
 	pos = clamp(pos, vec2(0.5), vec2(N - 1.5));
 
-	ivec2 i0 = ivec2(floor(pos));
-	ivec2 i1 = i0 + ivec2(1, 0);
-	ivec2 j0 = i0 + ivec2(0, 1);
-	ivec2 j1 = i0 + ivec2(1, 1);
+	float val;
+	if (interpMode == 0) {
+		// bilinear
+		ivec2 i0 = ivec2(floor(pos));
+		ivec2 i1 = i0 + ivec2(1, 0);
+		ivec2 j0 = i0 + ivec2(0, 1);
+		ivec2 j1 = i0 + ivec2(1, 1);
+		vec2 f = fract(pos);
 
-	vec2 f = fract(pos);
+		float d00 = imageLoad(src, i0).r;
+		float d10 = imageLoad(src, i1).r;
+		float d01 = imageLoad(src, j0).r;
+		float d11 = imageLoad(src, j1).r;
 
-	float d00 = imageLoad(src, i0).r;
-	float d10 = imageLoad(src, i1).r;
-	float d01 = imageLoad(src, j0).r;
-	float d11 = imageLoad(src, j1).r;
+		val = mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
+	} else {
+		// bicubic
+		val = bicubicSample(pos, N);
+	}
 
-	// float sample = mix(	mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
-	float sample = bicubicSample(src, pos, N);
-	imageStore(dst, coords, vec4(sample, 0.0, 0.0, 1.0));
+	imageStore(dst, coords, vec4(val, 0.0, 0.0, 1.0));
 }
