@@ -44,7 +44,7 @@ void main() {
 
 	vec2 velVal = imageLoad(vel, coords).rg;
 	vec2 pos = vec2(coords) - dt0 * velVal;
-	pos = clamp(pos, vec2(0.5), vec2(N - 1.5));
+	pos = clamp(pos, vec2(-0.5), vec2(float(N) - 0.5));
 
 	float val;
 	if (interpMode == 0) {
@@ -54,6 +54,13 @@ void main() {
 		ivec2 j0 = i0 + ivec2(0, 1);
 		ivec2 j1 = i0 + ivec2(1, 1);
 		vec2 f = fract(pos);
+
+		ivec2 clampMin = ivec2(0);
+        ivec2 clampMax = ivec2(N - 1);
+        i0 = clamp(i0, clampMin, clampMax);
+        i1 = clamp(i1, clampMin, clampMax);
+        j0 = clamp(j0, clampMin, clampMax);
+        j1 = clamp(j1, clampMin, clampMax);
 
 		float d00 = imageLoad(src, i0).r;
 		float d10 = imageLoad(src, i1).r;

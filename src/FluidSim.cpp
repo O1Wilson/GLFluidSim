@@ -206,12 +206,12 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
     std::swap(u0, u); std::swap(v0, v);
 
     uploadVelocityTexture(velTex, u0, v0);
-    uploadDensitySimTexture(densitySimTex, u);
+    uploadDensitySimTexture(densitySimTex, u0);
     fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
     downloadField(advectTex, u);
 
     uploadVelocityTexture(velTex, u0, v0);
-    uploadDensitySimTexture(densitySimTex, v);
+    uploadDensitySimTexture(densitySimTex, v0);
     fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
     downloadField(advectTex, v);
 
@@ -363,8 +363,6 @@ int main() {
 
         uploadVelocityTexture(velTex, u.data(), v.data());
         uploadDensitySimTexture(densitySimTex, dens.data());
-
-        fluidCompute(fluidShader, advectTex, densitySimTex, velTex, dt, interpMode, N);
         renderFrame(screenShader, advectTex, quadVAO);
 
         glfwSwapBuffers(window);
