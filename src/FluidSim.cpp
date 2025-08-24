@@ -20,6 +20,10 @@ static const int SIZE = (N + 2) * (N + 2);
 const GLuint gx = (N + 15) / 16;
 const GLuint gy = (N + 15) / 16;
 
+static bool lmbDown = false;
+static bool rmbDown = false;
+static double prevMouseX = 0.0, prevMouseY = 0.0;
+
 static std::vector<float> u(SIZE), v(SIZE);
 static std::vector<float> u_prev(SIZE), v_prev(SIZE);
 static std::vector<float> dens(SIZE), dens_prev(SIZE);
@@ -36,6 +40,8 @@ static InterpMode interpMode = BILINEAR;
 static GLuint quadVAO = 0, quadVBO = 0;
 static GLuint advectTex, densitySimTex, velTex;
 
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods); 
+static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos);
 static void uploadVelocityTexture(GLuint tex, const float* u, const float* v);
 static void uploadDensitySimTexture(GLuint tex, const float* density);
 
@@ -263,16 +269,44 @@ static void uploadDensitySimTexture(GLuint tex, const float* density) {
 
 static void fluidStart() {
     int i1 = N / 3;
-    int j1 = N;
+    int j1 = N - 1;
 
     int i2 = 2 * N / 3;
-    int j2 = 1;
+    int j2 = 2;
 
     dens_prev[IX(i1, j1)] = 200.0f;
-    v_prev[IX(i1, j1)] = -500.0f;
+    v_prev[IX(i1, j1)] = -100.0f;
 
     dens_prev[IX(i2, j2)] = 200.0f;
-    v_prev[IX(i2, j2)] = 500.0f;
+    v_prev[IX(i2, j2)] = 100.0f;
+}
+
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT) lmbDown = (action == GLFW_PRESS || action == GLFW_REPEAT);
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) rmbDown = (action == GLFW_PRESS || action == GLFW_REPEAT);
+    glfwGetCursorPos(window, &prevMouseX, &prevMouseY);
+}
+
+static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
+    auto toGrid = [](double x, double y, int& gi, int& gj) {
+        double nx = std::min(1.0, std::max(0.0, x / double(SCR_WIDTH)));
+        double ny = std::min(1.0, std::max(0.0, 1.0 - (y / double(SCR_HEIGHT))));
+        gi = std::min(N, std::max(1, 1 + int(nx * N)));
+        gj = std::min(N, std::max(1, 1 + int(ny * N)));
+    };
+    int gi, gj; toGrid(xpos, ypos, gi, gj); if (lmbDown) {
+        dens_prev[IX(gi, gj)] += 200.0f;
+    }
+    if (rmbDown) {
+        double dx = xpos - prevMouseX;
+        double dy = ypos - prevMouseY;
+        float forceScale = 5.0f;
+        u_prev[IX(gi, gj)] += forceScale * float(dx);
+        v_prev[IX(gi, gj)] += -forceScale * float(dy);
+    }
+
+    prevMouseX = xpos;
+    prevMouseY = ypos;
 }
 
 /* -------{Rendering Setup}-------- */
@@ -325,6 +359,8 @@ int main() {
     if (!window) { std::cout << "Failed to create GLFW window\n"; glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetCursorPosCallback(window, cursor_pos_callback);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cout << "Failed to init GLAD\n"; return -1; }
 
