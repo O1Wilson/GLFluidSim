@@ -1,8 +1,8 @@
 #version 460 core
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(r32f, binding = 0) uniform writeonly image2D dst;
-layout(r32f, binding = 1) uniform readonly image2D src;
-layout(rg32f, binding = 2) uniform readonly image2D vel;
+layout(binding = 1) uniform sampler2D  src;
+layout(binding = 2) uniform sampler2D vel;
 
 uniform float dt0;
 uniform int interpMode;
@@ -28,7 +28,7 @@ float bicubicSample(vec2 pos, int N) {
 		for (int n = -1; n <= 2; n++) {
 			int xi = clamp(ipos.x + n, 0, N-1);
 			int yi = clamp(ipos.y + m, 0, N-1);
-			row[n+1] = imageLoad(src, ivec2(xi, yi)).r;
+			row[n+1] = texelFetch(src, ivec2(xi, yi), 0).r;
 		}
 		arr[m+1] = cubicInterpolate(row[0], row[1], row[2], row[3], f.x);
 	}
@@ -42,7 +42,7 @@ void main() {
 
 	if (coords.x >= N || coords.y >= N) return;
 
-	vec2 velVal = imageLoad(vel, coords).rg;
+	vec2 velVal = texelFetch(vel, coords, 0).rg;
 	vec2 pos = vec2(coords) - dt0 * velVal;
 	pos = clamp(pos, vec2(-0.5), vec2(float(N) - 0.5));
 
@@ -62,10 +62,10 @@ void main() {
         j0 = clamp(j0, clampMin, clampMax);
         j1 = clamp(j1, clampMin, clampMax);
 
-		float d00 = imageLoad(src, i0).r;
-		float d10 = imageLoad(src, i1).r;
-		float d01 = imageLoad(src, j0).r;
-		float d11 = imageLoad(src, j1).r;
+		float d00 = texelFetch(src, i0, 0).r;
+		float d10 = texelFetch(src, i1, 0).r;
+		float d01 = texelFetch(src, j0, 0).r;
+		float d11 = texelFetch(src, j1, 0).r;
 
 		val = mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
 	} else {

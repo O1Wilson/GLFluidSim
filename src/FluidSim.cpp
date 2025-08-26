@@ -156,8 +156,8 @@ void fluidCompute(Shader& shader, GLuint dst, GLuint src, GLuint vel, float dt, 
     shader.setInt("interpMode", interpMode);
 
     glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-    glBindImageTexture(1, src, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32F);
-    glBindImageTexture(2, vel, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
+    glBindTextureUnit(1, src);
+    glBindTextureUnit(2, vel);
 
     glDispatchCompute(gx, gy, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);

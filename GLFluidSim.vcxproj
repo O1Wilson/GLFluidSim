@@ -141,6 +141,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\compute\advect.comp" />
+    <None Include="shaders\compute\jacobi.comp" />
     <None Include="shaders\fragment\framebuffer.frag" />
     <None Include="shaders\vertex\framebuffer.vs" />
   </ItemGroup>

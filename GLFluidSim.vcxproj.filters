@@ -49,5 +49,8 @@
     <None Include="shaders\compute\advect.comp">
       <Filter>Source Files\Shaders\Compute</Filter>
     </None>
+    <None Include="shaders\compute\jacobi.comp">
+      <Filter>Source Files\Shaders\Compute</Filter>
+    </None>
   </ItemGroup>
 </Project>
