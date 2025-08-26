@@ -52,5 +52,8 @@
     <None Include="shaders\compute\jacobi.comp">
       <Filter>Source Files\Shaders\Compute</Filter>
     </None>
+    <None Include="shaders\compute\setbounds.comp">
+      <Filter>Source Files\Shaders\Compute</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -1,4 +1,44 @@
 #version 460
 layout (local_size_x = 16, local_size_y = 16) in;
-layout (rg32f, binding = 0) uniform image2D dst;
-layout (rg32f, binding = 1) uniform image2D src;
+layout (r32f, binding = 0) uniform writeonly image2D dst;
+layout (binding = 1) uniform sampler2D src;
+layout (binding = 2) uniform sampler2D x0;
+layout (rg32f, binding = 3) uniform writeonly image2D veldst;
+
+uniform float a;
+uniform float c;
+uniform int mode;
+
+void main() {
+	ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
+    int N;
+
+    if (mode == 0) {
+        N = imageSize(dst).x;
+    } else if (mode == 1) {
+        N = imageSize(veldst).x;
+    }
+
+    if (coords.x == 0 || coords.y == 0 || coords.x >= N-1 || coords.y >= N-1)
+        return;
+
+    if (mode == 0) {
+        float left = texelFetch(src, coords + ivec2(-1, 0), 0).r;
+        float right = texelFetch(src, coords + ivec2(1, 0), 0).r;
+        float top = texelFetch(src, coords + ivec2(0, -1), 0).r;
+        float bottom = texelFetch(src, coords + ivec2(0, 1), 0).r;
+        float center = texelFetch(x0, coords, 0).r;
+        
+        float val = (center + a * (left + right + top + bottom)) / c;
+        imageStore(dst, coords, vec4(val, 0.0, 0.0, 0.0));
+    } else if (mode == 1) {
+        vec2 left = texelFetch(src, coords + ivec2(-1, 0), 0).rg;
+        vec2 right = texelFetch(src, coords + ivec2(1, 0), 0).rg;
+        vec2 top = texelFetch(src, coords + ivec2(0, -1), 0).rg;
+        vec2 bottom = texelFetch(src, coords + ivec2(0, 1), 0).rg;
+        vec2 center = texelFetch(x0, coords, 0).rg;
+
+        vec2 value = (center + a * (left + right + top + bottom)) / c;
+        imageStore(veldst, coords, vec4(value.x, value.y, 0.0, 0.0));
+    }
+}

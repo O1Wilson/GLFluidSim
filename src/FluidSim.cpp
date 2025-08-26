@@ -33,12 +33,14 @@ static float visc = 0.0001f;
 static float dt = 0.016f;
 
 static Shader* fluidShaderPtr = nullptr;
+static Shader* relaxationShaderPtr = nullptr;
+static Shader* setBndPtr = nullptr;
 
 enum InterpMode { BILINEAR = 0, BICUBIC = 1 };
 static InterpMode interpMode = BILINEAR;
 
 static GLuint quadVAO = 0, quadVBO = 0;
-static GLuint advectTex, densitySimTex, velTex;
+static GLuint advectTex, densitySimTex, velTex, densTexA, densTexB, velTexA, velTexB, projTexA, projTexB, divTex;
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods); 
 static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos);
@@ -145,6 +147,43 @@ static void lin_solve(int N, int b, float* x, const float* x0, float a, float c)
     }
 }
 
+static void lin_solve_gpu(Shader& shader, GLuint dst, GLuint src, GLuint x0, float a, float c, int b, int N, int mode) {
+    setBndPtr->use();
+    setBndPtr->setInt("b", b);
+    setBndPtr->setInt("N", N);
+    
+    shader.use();
+    shader.setFloat("a", a);
+    shader.setFloat("c", c);
+    shader.setInt("mode", mode);
+    glBindTextureUnit(2, x0);
+    
+    int iterations = 20;
+    for (int k = 0; k < iterations; k++) {
+        shader.use();
+
+        if (mode == 0) {
+            glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+        } else if (mode == 1) {
+            glBindImageTexture(3, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
+        }
+        glBindTextureUnit(1, src);
+
+        glDispatchCompute(gx, gy, 1);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+        setBndPtr->use();
+
+        glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+        glBindTextureUnit(1, dst);
+
+        glDispatchCompute(gx, gy, 1);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+        if (k < iterations - 1) std::swap(dst, src);
+    }
+}
+
 static void diffuse(int N, int b, float* x, const float* x0, float diff, float dt) {
     float a = dt * diff * N * N;
     lin_solve(N, b, x, x0, a, 1.0f + 4.0f * a);
@@ -175,6 +214,19 @@ static void downloadField(GLuint tex, float* dst) {
     }
 }
 
+// No Idea if this works
+//static void downloadVelField(GLuint tex, float* u, float* v) {
+//    std::vector<glm::vec2> buffer(N * N);
+//    glBindTexture(GL_TEXTURE_2D, tex);
+//    glGetTexImage(GL_TEXTURE_2D, 0, GL_RG, GL_FLOAT, buffer.data());
+//
+//    for (int j = 1; j <= N; j++) {
+//        for (int i = 1; i <= N; i++) {
+//            glm::vec2(u[IX(i, j)], v[IX(i, j)]) = buffer[(j - 1) * N + (i - 1)];
+//        }
+//    }
+//}
+
 static void project(int N, float* u, float* v, float* p, float* div) {
     float h = 1.0f / N;
 
@@ -189,6 +241,13 @@ static void project(int N, float* u, float* v, float* p, float* div) {
     set_bnd(N, 0, p);
 
     lin_solve(N, 0, p, div, 1.0f, 4.0f);
+
+    /*uploadDensitySimTexture(divTex, div);
+
+    glClearTexImage(projTexA, 0, GL_RED, GL_FLOAT, nullptr);
+    glClearTexImage(projTexB, 0, GL_RED, GL_FLOAT, nullptr);
+    lin_solve_gpu(*relaxationShaderPtr, projTexA, projTexB, divTex, 1.0f, 4.0f, 0, N);
+    downloadField(projTexA, p);*/
 
     for (int i = 1;i <= N;i++) {
         for (int j = 1;j <= N;j++) {
@@ -206,6 +265,18 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
 
     std::swap(u0, u); diffuse(N, 1, u, u0, visc, dt);
     std::swap(v0, v); diffuse(N, 2, v, v0, visc, dt);
+
+    /*float a = dt * diff * N * N;
+
+    std::swap(u0, u);
+    std::swap(v0, v);
+
+    uploadVelocityTexture(velTex, u0, v0);
+    lin_solve_gpu(*relaxationShaderPtr, velTexA, velTexB, velTex, a, 1.0f + 4.0f * a, 1, N, 1);
+    downloadVelField(velTexA, u, v);
+
+    lin_solve_gpu(*relaxationShaderPtr, velTexA, velTexB, velTex, a, 1.0f + 4.0f * a, 2, N, 1);
+    downloadVelField(velTexA, u, v);*/
 
     project(N, u, v, u0, v0);
 
@@ -230,7 +301,13 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
 static void dens_step(int N, float* x, float* x0, float* u, float* v, float diff, float dt) {
     add_source(N, x, x0, dt);
     std::swap(x0, x);
-    diffuse(N, 0, x, x0, diff, dt);
+
+    float a = dt * diff * N * N;
+
+    uploadDensitySimTexture(densitySimTex, x0);
+    lin_solve_gpu(*relaxationShaderPtr, densTexA, densTexB, densitySimTex, a, 1.0f + 4.0f * a, 0, N, 0);
+    downloadField(densTexA, x);
+
     std::swap(x0, x);
 
     uploadDensitySimTexture(densitySimTex, x0);
@@ -374,6 +451,16 @@ int main() {
     });
     fluidShaderPtr = &fluidShader;
 
+    Shader relaxationShader({
+        {"shaders/compute/jacobi.comp", GL_COMPUTE_SHADER}
+    });
+    relaxationShaderPtr = &relaxationShader;
+
+    Shader setBndShader({
+        {"shaders/compute/setbounds.comp", GL_COMPUTE_SHADER}
+    });
+    setBndPtr = &setBndShader;
+
     screenShader.use();
     screenShader.setInt("screenTexture", 0);
 
@@ -382,6 +469,13 @@ int main() {
     advectTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
     densitySimTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
     velTex = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    densTexA = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    densTexB = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    velTexA = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    velTexB = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    projTexA = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    projTexB = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
+    divTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
 
     double lastTime = glfwGetTime();
 

@@ -1,0 +1,61 @@
+#version 460
+layout (local_size_x = 16, local_size_y = 16) in;
+layout(r32f, binding = 0) uniform writeonly image2D dst;
+layout(binding = 1) uniform sampler2D src;
+layout (rg32f, binding = 2) uniform writeonly image2D veldst;
+
+uniform int b;
+uniform int N;
+uniform int mode;
+
+void main() {
+    ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
+    int x = coords.x;
+    int y = coords.y;
+
+    if (x > N || y > N) return;
+
+    float val = texelFetch(src, coords, 0).r;
+
+    // Left/right edges
+    if (x == 0 && y > 0 && y <= N) {
+        float inner = texelFetch(src, ivec2(1, y), 0).r;
+        val = (b == 1) ? -inner : inner;
+    } else if (x == N+1 && y > 0 && y <= N) {
+        float inner = texelFetch(src, ivec2(N, y), 0).r;
+        val = (b == 1) ? -inner : inner;
+    }
+
+    // Top/bottom edges
+    if (y == 0 && x > 0 && x <= N) {
+        float inner = texelFetch(src, ivec2(x, 1), 0).r;
+        val = (b == 2) ? -inner : inner;
+    } else if (y == N+1 && x > 0 && x <= N) {
+        float inner = texelFetch(src, ivec2(x, N), 0).r;
+        val = (b == 2) ? -inner : inner;
+    }
+
+    // Corners
+    if (x == 0 && y == 0) {
+        float v1 = texelFetch(src, ivec2(1, 0), 0).r;
+        float v2 = texelFetch(src, ivec2(0, 1), 0).r;
+        val = 0.5 * (v1 + v2);
+    }
+    if (x == 0 && y == N+1) {
+        float v1 = texelFetch(src, ivec2(1, N+1), 0).r;
+        float v2 = texelFetch(src, ivec2(0, N), 0).r;
+        val = 0.5 * (v1 + v2);
+    }
+    if (x == N+1 && y == 0) {
+        float v1 = texelFetch(src, ivec2(N, 0), 0).r;
+        float v2 = texelFetch(src, ivec2(N+1, 1), 0).r;
+        val = 0.5 * (v1 + v2);
+    }
+    if (x == N+1 && y == N+1) {
+        float v1 = texelFetch(src, ivec2(N, N+1), 0).r;
+        float v2 = texelFetch(src, ivec2(N+1, N), 0).r;
+        val = 0.5 * (v1 + v2);
+    }
+    
+    imageStore(dst, coords, vec4(val, 0, 0, 0));
+}
