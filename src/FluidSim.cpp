@@ -151,6 +151,7 @@ static void lin_solve_gpu(Shader& shader, GLuint dst, GLuint src, GLuint x0, flo
     setBndPtr->use();
     setBndPtr->setInt("b", b);
     setBndPtr->setInt("N", N);
+    setBndPtr->setInt("mode", mode);
     
     shader.use();
     shader.setFloat("a", a);
@@ -174,8 +175,14 @@ static void lin_solve_gpu(Shader& shader, GLuint dst, GLuint src, GLuint x0, flo
 
         setBndPtr->use();
 
-        glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-        glBindTextureUnit(1, dst);
+        if (mode == 0) {
+            glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+            glBindTextureUnit(1, dst);
+        }
+        else if (mode == 1) {
+            glBindImageTexture(2, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
+            glBindTextureUnit(1, dst);
+        }
 
         glDispatchCompute(gx, gy, 1);
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
@@ -215,17 +222,19 @@ static void downloadField(GLuint tex, float* dst) {
 }
 
 // No Idea if this works
-//static void downloadVelField(GLuint tex, float* u, float* v) {
-//    std::vector<glm::vec2> buffer(N * N);
-//    glBindTexture(GL_TEXTURE_2D, tex);
-//    glGetTexImage(GL_TEXTURE_2D, 0, GL_RG, GL_FLOAT, buffer.data());
-//
-//    for (int j = 1; j <= N; j++) {
-//        for (int i = 1; i <= N; i++) {
-//            glm::vec2(u[IX(i, j)], v[IX(i, j)]) = buffer[(j - 1) * N + (i - 1)];
-//        }
-//    }
-//}
+static void downloadVelField(GLuint tex, float* u, float* v) {
+    std::vector<glm::vec2> buffer(N * N);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RG, GL_FLOAT, buffer.data());
+
+    for (int j = 1; j <= N; j++) {
+        for (int i = 1; i <= N; i++) {
+            const glm::vec2& val = buffer[(j - 1) * N + (i - 1)];
+            u[IX(i, j)] = val.x;
+            v[IX(i, j)] = val.y;
+        }
+    }
+}
 
 static void project(int N, float* u, float* v, float* p, float* div) {
     float h = 1.0f / N;
@@ -242,11 +251,11 @@ static void project(int N, float* u, float* v, float* p, float* div) {
 
     lin_solve(N, 0, p, div, 1.0f, 4.0f);
 
+    // Doesn't work
     /*uploadDensitySimTexture(divTex, div);
-
     glClearTexImage(projTexA, 0, GL_RED, GL_FLOAT, nullptr);
     glClearTexImage(projTexB, 0, GL_RED, GL_FLOAT, nullptr);
-    lin_solve_gpu(*relaxationShaderPtr, projTexA, projTexB, divTex, 1.0f, 4.0f, 0, N);
+    lin_solve_gpu(*relaxationShaderPtr, projTexA, projTexB, divTex, 1.0f, 4.0f, 0, N, 0);
     downloadField(projTexA, p);*/
 
     for (int i = 1;i <= N;i++) {
@@ -263,10 +272,10 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
     add_source(N, u, u0, dt);
     add_source(N, v, v0, dt);
 
-    std::swap(u0, u); diffuse(N, 1, u, u0, visc, dt);
-    std::swap(v0, v); diffuse(N, 2, v, v0, visc, dt);
+    /*std::swap(u0, u); diffuse(N, 1, u, u0, visc, dt);
+    std::swap(v0, v); diffuse(N, 2, v, v0, visc, dt);*/
 
-    /*float a = dt * diff * N * N;
+    float a = dt * visc * N * N;
 
     std::swap(u0, u);
     std::swap(v0, v);
@@ -276,7 +285,7 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
     downloadVelField(velTexA, u, v);
 
     lin_solve_gpu(*relaxationShaderPtr, velTexA, velTexB, velTex, a, 1.0f + 4.0f * a, 2, N, 1);
-    downloadVelField(velTexA, u, v);*/
+    downloadVelField(velTexA, u, v);
 
     project(N, u, v, u0, v0);
 
