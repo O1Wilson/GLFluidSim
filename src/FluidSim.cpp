@@ -360,11 +360,11 @@ static void fluidStart() {
     int i2 = 2 * N / 3;
     int j2 = 2;
 
-    dens_prev[IX(i1, j1)] = 200.0f;
-    v_prev[IX(i1, j1)] = -100.0f;
+    dens_prev[IX(i1, j1)] = 20.0f;
+    v_prev[IX(i1, j1)] = -10.0f;
 
-    dens_prev[IX(i2, j2)] = 200.0f;
-    v_prev[IX(i2, j2)] = 100.0f;
+    dens_prev[IX(i2, j2)] = 20.0f;
+    v_prev[IX(i2, j2)] = 10.0f;
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
