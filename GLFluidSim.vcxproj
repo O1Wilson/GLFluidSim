@@ -71,8 +71,8 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(IncludePath)</IncludePath>
-    <LibraryPath>$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\OpenGL\includes;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\OpenGL\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -108,13 +108,12 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\o1wil\OneDrive\Documents\GitHub\GLFluidSim\include;C:\OpenGL\includes</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\Thetr\OneDrive\Documents\GitHub\GLFluidSim\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glfw3.lib;opengl32.lib;kernel32.lib;user32.lib;gdi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\OpenGL\lib</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -141,11 +140,8 @@
     <ClInclude Include="include\shader.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\compute\advect.comp" />
-    <None Include="shaders\compute\jacobi.comp" />
-    <None Include="shaders\compute\setbounds.comp" />
-    <None Include="shaders\fragment\framebuffer.frag" />
-    <None Include="shaders\vertex\framebuffer.vs" />
+    <None Include="shaders\framebuffer.frag" />
+    <None Include="shaders\framebuffer.vs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,6 +1,5 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <glm/glm.hpp>
 
 #include <shader.h>
 
@@ -9,64 +8,113 @@
 #include <algorithm>
 #include <cmath>
 
-/* -------{Simulation Constants and Globals}-------- */
-
 static const unsigned int SCR_WIDTH = 800;
 static const unsigned int SCR_HEIGHT = 600;
 
 static const int N = 128;
 static const int SIZE = (N + 2) * (N + 2);
 
-const GLuint gx = (N + 15) / 16;
-const GLuint gy = (N + 15) / 16;
-
-static bool lmbDown = false;
-static bool rmbDown = false;
-static double prevMouseX = 0.0, prevMouseY = 0.0;
-
 static std::vector<float> u(SIZE), v(SIZE);
 static std::vector<float> u_prev(SIZE), v_prev(SIZE);
 static std::vector<float> dens(SIZE), dens_prev(SIZE);
 
-static float diff = 0.0001f;
+static float diff = 0.0f;
 static float visc = 0.0001f;
 static float dt = 0.016f;
 
-static Shader* fluidShaderPtr = nullptr;
-static Shader* relaxationShaderPtr = nullptr;
-static Shader* setBndPtr = nullptr;
+static GLuint quadVAO = 0, quadVBO = 0;
+static GLuint densityTex = 0;
+
+static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+static void processInput(GLFWwindow* window);
+static void set_bnd(int N, int b, float* x);
+static void add_source(int N, float* x, const float* s, float dt);
+static void lin_solve(int N, int b, float* x, const float* x0, float a, float c);
+static void diffuse(int N, int b, float* x, const float* x0, float diff, float dt);
+static void advect(int N, int b, float* d, const float* d0, const float* u, const float* v, float dt);
+static void project(int N, float* u, float* v, float* p, float* div);
+static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc, float dt);
+static void dens_step(int N, float* x, float* x0, float* u, float* v, float diff, float dt);
+static void uploadDensityTexture(GLuint tex, const float* density);
+static void fluidStart();
+static void setupQuad(GLuint& vao, GLuint& vbo);
+
+inline int IX(int i, int j) { return i + (N + 2) * j; }
 
 enum InterpMode { BILINEAR = 0, BICUBIC = 1 };
 static InterpMode interpMode = BILINEAR;
 
-static GLuint quadVAO = 0, quadVBO = 0;
-static GLuint advectTex, densitySimTex, velTex, densTexA, densTexB, velTexA, velTexB, projTexA, projTexB, divTex;
+int main() {
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "2D Fluid Sim", nullptr, nullptr);
+    if (!window) { std::cout << "Failed to create GLFW window\n"; glfwTerminate(); return -1; }
+    glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods); 
-static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos);
-static void uploadVelocityTexture(GLuint tex, const float* u, const float* v);
-static void uploadDensitySimTexture(GLuint tex, const float* density);
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cout << "Failed to init GLAD\n"; return -1; }
+    glDisable(GL_DEPTH_TEST);
 
-inline int IX(int i, int j) { return i + (N + 2) * j; }
+    Shader screenShader({
+        {"shaders/framebuffer.vs", GL_VERTEX_SHADER},
+        {"shaders/framebuffer.frag", GL_FRAGMENT_SHADER}
+    });
 
-GLuint createTexture2D(int width, int height, GLint internalFormat, GLenum format, GLenum type, GLint minFilter = GL_NEAREST, 
-    GLint magFilter = GL_NEAREST, GLint wrapS = GL_CLAMP_TO_EDGE, GLint wrapT = GL_CLAMP_TO_EDGE, const void* data = nullptr) 
-{
-    GLuint tex;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
+    /*Shader computeShader({
+        {"shaders/my_compute.cs", GL_COMPUTE_SHADER}
+    });*/
 
-    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, data);
+    screenShader.use();
+    screenShader.setInt("screenTexture", 0);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT);
+    setupQuad(quadVAO, quadVBO);
 
-    return tex;
+    glGenTextures(1, &densityTex);
+    glBindTexture(GL_TEXTURE_2D, densityTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    double lastTime = glfwGetTime();
+
+    while (!glfwWindowShouldClose(window)) {
+        processInput(window);
+
+        double now = glfwGetTime();
+        dt = float(std::min(0.1, now - lastTime));
+        lastTime = now;
+
+        fluidStart();
+
+        vel_step(N, u.data(), v.data(), u_prev.data(), v_prev.data(), visc, dt);
+        dens_step(N, dens.data(), dens_prev.data(), u.data(), v.data(), diff, dt);
+
+        uploadDensityTexture(densityTex, dens.data());
+
+        glClearColor(0.05f, 0.06f, 0.07f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        screenShader.use();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, densityTex);
+        glBindVertexArray(quadVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteBuffers(1, &quadVBO);
+    glDeleteTextures(1, &densityTex);
+
+    glfwTerminate();
+    return 0;
 }
-
-/* -------{GLFW Input + Window Callbacks}-------- */
 
 static void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
@@ -78,7 +126,6 @@ static void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) interpMode = BILINEAR;
     if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) interpMode = BICUBIC;
 
-    //update to gpu
     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
         std::fill(u.begin(), u.end(), 0.0f);
         std::fill(v.begin(), v.end(), 0.0f);
@@ -88,34 +135,6 @@ static void processInput(GLFWwindow* window) {
         std::fill(dens_prev.begin(), dens_prev.end(), 0.0f);
     }
 }
-
-/* -------{Math / Fluid Simulation Functions}-------- */
-
-/* ------------------------------------------------------------------------
-   {Variable Dictionary}
-   Based on Jos Stam's "Stable Fluids" (1999)
-
-   u      : x-component of velocity field (horizontal velocity)
-   v      : y-component of velocity field (vertical velocity)
-   u0     : previous step's x-component velocity (temporary buffer)
-   v0     : previous step's y-component velocity (temporary buffer)
-
-   dens   : density field (dye concentration)
-   dens0  : previous step’s density field (temporary buffer)
-
-   p      : pressure field
-   div    : divergence field
-
-   N      : grid resolution (size is N x N cells)
-   SIZE   : total number of cells including boundary
-   IX(i,j): macro function mapping 2D grid coordinates to 1D index
-
-   dt     : timestep (step size)
-   diff   : diffusion rate
-   visc   : viscosity
-   b      : flag for boundary type  (0 = scalar, 1 = u-component, 2 = v-component)
-
-   ------------------------------------------------------------------------ */
 
 static void set_bnd(int N, int b, float* x) {
     for (int i = 1; i <= N; i++) {
@@ -147,93 +166,70 @@ static void lin_solve(int N, int b, float* x, const float* x0, float a, float c)
     }
 }
 
-static void lin_solve_gpu(Shader& shader, GLuint dst, GLuint src, GLuint x0, float a, float c, int b, int N, int mode) {
-    setBndPtr->use();
-    setBndPtr->setInt("b", b);
-    setBndPtr->setInt("N", N);
-    setBndPtr->setInt("mode", mode);
-    
-    shader.use();
-    shader.setFloat("a", a);
-    shader.setFloat("c", c);
-    shader.setInt("mode", mode);
-    glBindTextureUnit(2, x0);
-    
-    int iterations = 20;
-    for (int k = 0; k < iterations; k++) {
-        shader.use();
-
-        if (mode == 0) {
-            glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-        } else if (mode == 1) {
-            glBindImageTexture(3, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
-        }
-        glBindTextureUnit(1, src);
-
-        glDispatchCompute(gx, gy, 1);
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-        setBndPtr->use();
-
-        if (mode == 0) {
-            glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-            glBindTextureUnit(1, dst);
-        }
-        else if (mode == 1) {
-            glBindImageTexture(2, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
-            glBindTextureUnit(1, dst);
-        }
-
-        glDispatchCompute(gx, gy, 1);
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-        if (k < iterations - 1) std::swap(dst, src);
-    }
-}
-
 static void diffuse(int N, int b, float* x, const float* x0, float diff, float dt) {
     float a = dt * diff * N * N;
     lin_solve(N, b, x, x0, a, 1.0f + 4.0f * a);
 }
 
-void fluidCompute(Shader& shader, GLuint dst, GLuint src, GLuint vel, float dt, int interpMode, int N) {
-    shader.use();
-    shader.setFloat("dt0", dt * N);
-    shader.setInt("interpMode", interpMode);
-
-    glBindImageTexture(0, dst, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
-    glBindTextureUnit(1, src);
-    glBindTextureUnit(2, vel);
-
-    glDispatchCompute(gx, gy, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+inline float cubicInterpolate(float p0, float p1, float p2, float p3, float t) {
+    float a = -0.5f * p0 + 1.5f * p1 - 1.5f * p2 + 0.5f * p3;
+    float b = p0 - 2.5f * p1 + 2.0f * p2 - 0.5f * p3;
+    float c = -0.5f * p0 + 0.5f * p2;
+    float d = p1;
+    return ((a * t + b) * t + c) * t + d;
 }
 
-static void downloadField(GLuint tex, float* dst) {
-    std::vector<float> buffer(N * N);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, buffer.data());
+float bicubicSample(const float* d0, float x, float y, int N) {
+    int ix = (int)floor(x);
+    int iy = (int)floor(y);
 
-    for (int j = 1; j <= N; j++) {
-        for (int i = 1; i <= N; i++) {
-            dst[IX(i, j)] = buffer[(j - 1) * N + (i - 1)];
+    float tx = x - ix;
+    float ty = y - iy;
+
+    float arr[4];
+    for (int m = -1; m <= 2; m++) {
+        float row[4];
+        for (int n = -1; n <= 2; n++) {
+            int xi = std::min(N + 1, std::max(0, ix + n));
+            int yi = std::min(N + 1, std::max(0, iy + m));
+            row[n + 1] = d0[IX(xi, yi)];
         }
+        arr[m + 1] = cubicInterpolate(row[0], row[1], row[2], row[3], tx);
     }
+    return cubicInterpolate(arr[0], arr[1], arr[2], arr[3], ty);
 }
 
-// No Idea if this works
-static void downloadVelField(GLuint tex, float* u, float* v) {
-    std::vector<glm::vec2> buffer(N * N);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RG, GL_FLOAT, buffer.data());
+static void advect(int N, int b, float* d, const float* d0, const float* u, const float* v, float dt) {
+    float dt0 = dt * N;
+    for (int i = 1; i <= N; i++) {
+        for (int j = 1; j <= N; j++) {
+            float x = i - dt0 * u[IX(i, j)];
+            float y = j - dt0 * v[IX(i, j)];
 
-    for (int j = 1; j <= N; j++) {
-        for (int i = 1; i <= N; i++) {
-            const glm::vec2& val = buffer[(j - 1) * N + (i - 1)];
-            u[IX(i, j)] = val.x;
-            v[IX(i, j)] = val.y;
+            if (x < 0.5f) x = 0.5f;
+            if (x > N + 0.5f) x = N + 0.5f;
+            int i0 = (int)x;
+            int i1 = i0 + 1;
+
+            if (y < 0.5f) y = 0.5f;
+            if (y > N + 0.5f) y = N + 0.5f;
+            int j0 = (int)y;
+            int j1 = j0 + 1;
+
+            if (interpMode == BILINEAR) {
+                float s1 = x - i0; float s0 = 1.0f - s1;
+                float t1 = y - j0; float t0 = 1.0f - t1;
+
+                d[IX(i, j)] =
+                    s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) +
+                    s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
+            }
+            else {
+                d[IX(i, j)] = bicubicSample(d0, x, y, N);
+            }
         }
     }
+    set_bnd(N, b, d);
 }
 
 static void project(int N, float* u, float* v, float* p, float* div) {
@@ -251,13 +247,6 @@ static void project(int N, float* u, float* v, float* p, float* div) {
 
     lin_solve(N, 0, p, div, 1.0f, 4.0f);
 
-    // Doesn't work
-    /*uploadDensitySimTexture(divTex, div);
-    glClearTexImage(projTexA, 0, GL_RED, GL_FLOAT, nullptr);
-    glClearTexImage(projTexB, 0, GL_RED, GL_FLOAT, nullptr);
-    lin_solve_gpu(*relaxationShaderPtr, projTexA, projTexB, divTex, 1.0f, 4.0f, 0, N, 0);
-    downloadField(projTexA, p);*/
-
     for (int i = 1;i <= N;i++) {
         for (int j = 1;j <= N;j++) {
             u[IX(i, j)] -= 0.5f * (p[IX(i + 1, j)] - p[IX(i - 1, j)]) / h;
@@ -272,34 +261,14 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
     add_source(N, u, u0, dt);
     add_source(N, v, v0, dt);
 
-    /*std::swap(u0, u); diffuse(N, 1, u, u0, visc, dt);
-    std::swap(v0, v); diffuse(N, 2, v, v0, visc, dt);*/
-
-    float a = dt * visc * N * N;
-
-    std::swap(u0, u);
-    std::swap(v0, v);
-
-    uploadVelocityTexture(velTex, u0, v0);
-    lin_solve_gpu(*relaxationShaderPtr, velTexA, velTexB, velTex, a, 1.0f + 4.0f * a, 1, N, 1);
-    downloadVelField(velTexA, u, v);
-
-    lin_solve_gpu(*relaxationShaderPtr, velTexA, velTexB, velTex, a, 1.0f + 4.0f * a, 2, N, 1);
-    downloadVelField(velTexA, u, v);
+    std::swap(u0, u); diffuse(N, 1, u, u0, visc, dt);
+    std::swap(v0, v); diffuse(N, 2, v, v0, visc, dt);
 
     project(N, u, v, u0, v0);
 
     std::swap(u0, u); std::swap(v0, v);
-
-    uploadVelocityTexture(velTex, u0, v0);
-    uploadDensitySimTexture(densitySimTex, u0);
-    fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
-    downloadField(advectTex, u);
-
-    uploadVelocityTexture(velTex, u0, v0);
-    uploadDensitySimTexture(densitySimTex, v0);
-    fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
-    downloadField(advectTex, v);
+    advect(N, 1, u, u0, u0, v0, dt);
+    advect(N, 2, v, v0, u0, v0, dt);
 
     project(N, u, v, u0, v0);
 
@@ -309,93 +278,42 @@ static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc
 
 static void dens_step(int N, float* x, float* x0, float* u, float* v, float diff, float dt) {
     add_source(N, x, x0, dt);
-    std::swap(x0, x);
-
-    float a = dt * diff * N * N;
-
-    uploadDensitySimTexture(densitySimTex, x0);
-    lin_solve_gpu(*relaxationShaderPtr, densTexA, densTexB, densitySimTex, a, 1.0f + 4.0f * a, 0, N, 0);
-    downloadField(densTexA, x);
-
-    std::swap(x0, x);
-
-    uploadDensitySimTexture(densitySimTex, x0);
-    uploadVelocityTexture(velTex, u, v);
-    fluidCompute(*fluidShaderPtr, advectTex, densitySimTex, velTex, dt, interpMode, N);
-    downloadField(advectTex, x);
+    std::swap(x0, x); diffuse(N, 0, x, x0, diff, dt);
+    std::swap(x0, x); advect(N, 0, x, x0, u, v, dt);
 
     std::fill(x0, x0 + SIZE, 0.0f);
 }
 
-/* -------{Temporary GPU Upload Utilities}-------- */
-
-static void uploadVelocityTexture(GLuint tex, const float* u, const float* v) {
-    std::vector<glm::vec2> buffer(N * N);
+static void uploadDensityTexture(GLuint tex, const float* density) {
+    std::vector<unsigned char> buffer(N * N);
     for (int j = 1; j <= N; j++) {
         for (int i = 1; i <= N; i++) {
-            buffer[(j - 1) * N + (i - 1)] = glm::vec2(u[IX(i, j)], v[IX(i, j)]);
+            float d = std::min(1.0f, std::max(0.0f, density[IX(i, j)]));
+            buffer[(j - 1) * N + (i - 1)] = static_cast<unsigned char>(d * 255.0f);
         }
     }
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, N, N, 0, GL_RG, GL_FLOAT, buffer.data());
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glBindTexture(GL_TEXTURE_2D, densityTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, buffer.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
-
-static void uploadDensitySimTexture(GLuint tex, const float* density) {
-    std::vector<float> buffer(N * N);
-    for (int j = 1; j <= N; j++) {
-        for (int i = 1; i <= N; i++) {
-            buffer[(j - 1) * N + (i - 1)] = density[IX(i, j)];
-        }
-    }
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, N, N, 0, GL_RED, GL_FLOAT, buffer.data());
-}
-
-/* -------{Simulation Setup / Fluid Spawn}-------- */
 
 static void fluidStart() {
     int i1 = N / 3;
-    int j1 = N - 1;
+    int j1 = N;
 
     int i2 = 2 * N / 3;
-    int j2 = 2;
+    int j2 = 1;
 
-    dens_prev[IX(i1, j1)] = 20.0f;
-    v_prev[IX(i1, j1)] = -10.0f;
+    dens_prev[IX(i1, j1)] = 200.0f;
+    v_prev[IX(i1, j1)] = -500.0f;
 
-    dens_prev[IX(i2, j2)] = 20.0f;
-    v_prev[IX(i2, j2)] = 10.0f;
+    dens_prev[IX(i2, j2)] = 200.0f;
+    v_prev[IX(i2, j2)] = 500.0f;
 }
-
-static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-    if (button == GLFW_MOUSE_BUTTON_LEFT) lmbDown = (action == GLFW_PRESS || action == GLFW_REPEAT);
-    if (button == GLFW_MOUSE_BUTTON_RIGHT) rmbDown = (action == GLFW_PRESS || action == GLFW_REPEAT);
-    glfwGetCursorPos(window, &prevMouseX, &prevMouseY);
-}
-
-static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
-    auto toGrid = [](double x, double y, int& gi, int& gj) {
-        double nx = std::min(1.0, std::max(0.0, x / double(SCR_WIDTH)));
-        double ny = std::min(1.0, std::max(0.0, 1.0 - (y / double(SCR_HEIGHT))));
-        gi = std::min(N, std::max(1, 1 + int(nx * N)));
-        gj = std::min(N, std::max(1, 1 + int(ny * N)));
-    };
-    int gi, gj; toGrid(xpos, ypos, gi, gj); if (lmbDown) {
-        dens_prev[IX(gi, gj)] += 200.0f;
-    }
-    if (rmbDown) {
-        double dx = xpos - prevMouseX;
-        double dy = ypos - prevMouseY;
-        float forceScale = 5.0f;
-        u_prev[IX(gi, gj)] += forceScale * float(dx);
-        v_prev[IX(gi, gj)] += -forceScale * float(dy);
-    }
-
-    prevMouseX = xpos;
-    prevMouseY = ypos;
-}
-
-/* -------{Rendering Setup}-------- */
 
 static void setupQuad(GLuint& vao, GLuint& vbo) {
     float quadVertices[] = {
@@ -418,102 +336,4 @@ static void setupQuad(GLuint& vao, GLuint& vbo) {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
-}
-
-void renderFrame(Shader& shader, GLuint tex, GLuint vao) {
-    glClearColor(0.05f, 0.06f, 0.07f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    shader.use();
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-}
-
-/* -------{Program Initializion and Render Loop}-------- */
-
-int main() {
-    glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "2D Fluid Sim", nullptr, nullptr);
-    if (!window) { std::cout << "Failed to create GLFW window\n"; glfwTerminate(); return -1; }
-    glfwMakeContextCurrent(window);
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetMouseButtonCallback(window, mouse_button_callback);
-    glfwSetCursorPosCallback(window, cursor_pos_callback);
-
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::cout << "Failed to init GLAD\n"; return -1; }
-
-    Shader screenShader({
-        {"shaders/vertex/framebuffer.vs", GL_VERTEX_SHADER},
-        {"shaders/fragment/framebuffer.frag", GL_FRAGMENT_SHADER}
-    });
-
-    Shader fluidShader({
-        {"shaders/compute/advect.comp", GL_COMPUTE_SHADER}
-    });
-    fluidShaderPtr = &fluidShader;
-
-    Shader relaxationShader({
-        {"shaders/compute/jacobi.comp", GL_COMPUTE_SHADER}
-    });
-    relaxationShaderPtr = &relaxationShader;
-
-    Shader setBndShader({
-        {"shaders/compute/setbounds.comp", GL_COMPUTE_SHADER}
-    });
-    setBndPtr = &setBndShader;
-
-    screenShader.use();
-    screenShader.setInt("screenTexture", 0);
-
-    setupQuad(quadVAO, quadVBO);
-
-    advectTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    densitySimTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    velTex = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    densTexA = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    densTexB = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    velTexA = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    velTexB = createTexture2D(N, N, GL_RG32F, GL_RG, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    projTexA = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    projTexB = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-    divTex = createTexture2D(N, N, GL_R32F, GL_RED, GL_FLOAT, GL_NEAREST, GL_NEAREST);
-
-    double lastTime = glfwGetTime();
-
-    while (!glfwWindowShouldClose(window)) {
-        processInput(window);
-
-        double now = glfwGetTime();
-        dt = float(std::min(0.1, now - lastTime));
-        lastTime = now;
-
-        fluidStart();
-
-        vel_step(N, u.data(), v.data(), u_prev.data(), v_prev.data(), visc, dt);
-        dens_step(N, dens.data(), dens_prev.data(), u.data(), v.data(), diff, dt);
-
-        uploadVelocityTexture(velTex, u.data(), v.data());
-        uploadDensitySimTexture(densitySimTex, dens.data());
-        renderFrame(screenShader, advectTex, quadVAO);
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
-
-    glDeleteVertexArrays(1, &quadVAO);
-    glDeleteBuffers(1, &quadVBO);
-    glDeleteTextures(1, &advectTex);
-    glDeleteTextures(1, &densitySimTex);
-    glDeleteTextures(1, &velTex);
-
-    glfwTerminate();
-    return 0;
 }
