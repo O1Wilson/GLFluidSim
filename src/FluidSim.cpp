@@ -18,8 +18,8 @@ static std::vector<float> u(SIZE), v(SIZE);
 static std::vector<float> u_prev(SIZE), v_prev(SIZE);
 static std::vector<float> dens(SIZE), dens_prev(SIZE);
 
-static float diff = 0.0001f;
-static float visc = 0.0001f;
+static float diff = 0.00001f;
+static float visc = 0.00001f;
 static float dt = 0.016f;
 
 static GLuint quadVAO = 0, quadVBO = 0;
@@ -36,7 +36,7 @@ static void project(int N, float* u, float* v, float* p, float* div);
 static void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc, float dt);
 static void dens_step(int N, float* x, float* x0, float* u, float* v, float diff, float dt);
 static void uploadDensityTexture(GLuint tex, const float* density);
-static void fluidStart();
+static void fluidStart(GLFWwindow* window);
 static void setupQuad(GLuint& vao, GLuint& vbo);
 
 #define IX(i, j) ((i) + (N + 2) * (j))
@@ -85,7 +85,7 @@ int main() {
         dt = float(std::min(0.1, now - lastTime));
         lastTime = now;
 
-        fluidStart();
+        fluidStart(window);
 
         vel_step(N, u.data(), v.data(), u_prev.data(), v_prev.data(), visc, dt);
         dens_step(N, dens.data(), dens_prev.data(), u.data(), v.data(), diff, dt);
@@ -293,18 +293,48 @@ static void uploadDensityTexture(GLuint tex, const float* density) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, buffer.data());
 }
 
-static void fluidStart() {
-    int i1 = N / 3;
-    int j1 = N - 5;
+static void fluidStart(GLFWwindow* window) {
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        int x1 = 15;
+        int y1 = N - 15;
+        dens_prev[IX(x1, y1)] += 150.0f;
+        u_prev[IX(x1, y1)] += 400.0f;
+        v_prev[IX(x1, y1)] -= 400.0f;
 
-    int i2 = 2 * N / 3;
-    int j2 = 6;
+        int x2 = N - 15;
+        int y2 = 15;
+        dens_prev[IX(x2, y2)] += 150.0f;
+        u_prev[IX(x2, y2)] -= 400.0f;
+        v_prev[IX(x2, y2)] += 400.0f;
+    }
 
-    dens_prev[IX(i1, j1)] = 200.0f;
-    v_prev[IX(i1, j1)] = -500.0f;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        int x1 = N - 15;
+        int y1 = N - 15;
+        dens_prev[IX(x1, y1)] += 150.0f;
+        u_prev[IX(x1, y1)] -= 400.0f;
+        v_prev[IX(x1, y1)] -= 400.0f;
 
-    dens_prev[IX(i2, j2)] = 200.0f;
-    v_prev[IX(i2, j2)] = 500.0f;
+        int x2 = 15;
+        int y2 = 15;
+        dens_prev[IX(x2, y2)] += 150.0f;
+        u_prev[IX(x2, y2)] += 400.0f;
+        v_prev[IX(x2, y2)] += 400.0f;
+    }
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        int x = N / 2;
+        int y = N - 15;
+        dens_prev[IX(x, y)] += 150.0f;
+        v_prev[IX(x, y)] -= 400.0f;
+    }
+
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        int x = N / 2;
+        int y = 15;
+        dens_prev[IX(x, y)] += 150.0f;
+        v_prev[IX(x, y)] += 400.0f;
+    }
 }
 
 static void setupQuad(GLuint& vao, GLuint& vbo) {
