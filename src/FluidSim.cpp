@@ -18,7 +18,7 @@ static std::vector<float> u(SIZE), v(SIZE);
 static std::vector<float> u_prev(SIZE), v_prev(SIZE);
 static std::vector<float> dens(SIZE), dens_prev(SIZE);
 
-static float diff = 0.0f;
+static float diff = 0.0001f;
 static float visc = 0.0001f;
 static float dt = 0.016f;
 
@@ -39,7 +39,7 @@ static void uploadDensityTexture(GLuint tex, const float* density);
 static void fluidStart();
 static void setupQuad(GLuint& vao, GLuint& vbo);
 
-inline int IX(int i, int j) { return i + (N + 2) * j; }
+#define IX(i, j) ((i) + (N + 2) * (j))
 
 enum InterpMode { BILINEAR = 0, BICUBIC = 1 };
 static InterpMode interpMode = BILINEAR;
@@ -64,10 +64,6 @@ int main() {
         {"shaders/framebuffer.vs", GL_VERTEX_SHADER},
         {"shaders/framebuffer.frag", GL_FRAGMENT_SHADER}
     });
-
-    /*Shader computeShader({
-        {"shaders/my_compute.cs", GL_COMPUTE_SHADER}
-    });*/
 
     screenShader.use();
     screenShader.setInt("screenTexture", 0);
@@ -156,8 +152,8 @@ static void add_source(int N, float* x, const float* s, float dt) {
 
 static void lin_solve(int N, int b, float* x, const float* x0, float a, float c) {
     for (int k = 0; k < 20; k++) {
-        for (int i = 1; i <= N; i++) {
-            for (int j = 1; j <= N; j++) {
+        for (int j = 1;j <= N;j++) {
+            for (int i = 1;i <= N;i++) {
                 x[IX(i, j)] = (x0[IX(i, j)] + a * (x[IX(i - 1, j)] + x[IX(i + 1, j)] +
                     x[IX(i, j - 1)] + x[IX(i, j + 1)])) / c;
             }
@@ -201,8 +197,8 @@ float bicubicSample(const float* d0, float x, float y, int N) {
 
 static void advect(int N, int b, float* d, const float* d0, const float* u, const float* v, float dt) {
     float dt0 = dt * N;
-    for (int i = 1; i <= N; i++) {
-        for (int j = 1; j <= N; j++) {
+    for (int j = 1;j <= N;j++) {
+        for (int i = 1;i <= N;i++) {
             float x = i - dt0 * u[IX(i, j)];
             float y = j - dt0 * v[IX(i, j)];
 
@@ -235,8 +231,8 @@ static void advect(int N, int b, float* d, const float* d0, const float* u, cons
 static void project(int N, float* u, float* v, float* p, float* div) {
     float h = 1.0f / N;
 
-    for (int i = 1;i <= N;i++) {
-        for (int j = 1;j <= N;j++) {
+    for (int j = 1;j <= N;j++) {
+        for (int i = 1;i <= N;i++) {
             div[IX(i, j)] = -0.5f * h * (u[IX(i + 1, j)] - u[IX(i - 1, j)] +
                 v[IX(i, j + 1)] - v[IX(i, j - 1)]);
             p[IX(i, j)] = 0.0f;
@@ -247,8 +243,8 @@ static void project(int N, float* u, float* v, float* p, float* div) {
 
     lin_solve(N, 0, p, div, 1.0f, 4.0f);
 
-    for (int i = 1;i <= N;i++) {
-        for (int j = 1;j <= N;j++) {
+    for (int j = 1;j <= N;j++) {
+        for (int i = 1;i <= N;i++) {
             u[IX(i, j)] -= 0.5f * (p[IX(i + 1, j)] - p[IX(i - 1, j)]) / h;
             v[IX(i, j)] -= 0.5f * (p[IX(i, j + 1)] - p[IX(i, j - 1)]) / h;
         }
@@ -295,18 +291,14 @@ static void uploadDensityTexture(GLuint tex, const float* density) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glBindTexture(GL_TEXTURE_2D, densityTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, N, N, 0, GL_RED, GL_UNSIGNED_BYTE, buffer.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
 static void fluidStart() {
     int i1 = N / 3;
-    int j1 = N;
+    int j1 = N - 5;
 
     int i2 = 2 * N / 3;
-    int j2 = 1;
+    int j2 = 6;
 
     dens_prev[IX(i1, j1)] = 200.0f;
     v_prev[IX(i1, j1)] = -500.0f;
