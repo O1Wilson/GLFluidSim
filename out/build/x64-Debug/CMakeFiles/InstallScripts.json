@@ -1,0 +1,9 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/o1wil/OneDrive/Documents/GitHub/GLFluidSim/out/build/x64-Debug/cmake_install.cmake",
+		"C:/Users/o1wil/OneDrive/Documents/GitHub/GLFluidSim/out/build/x64-Debug/external/glfw/cmake_install.cmake",
+		"C:/Users/o1wil/OneDrive/Documents/GitHub/GLFluidSim/out/build/x64-Debug/external/glfw/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

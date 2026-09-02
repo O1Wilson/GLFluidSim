@@ -61,11 +61,8 @@ Key implementation components include:
 | ESC |	Exit |
 
 ## Requisites
-- **OpenGL 4.6** for rendering  
-- **Glad** for OpenGL function loading  
-- **GLFW** for context/window management  
-- **GLM** for math utilities
-- **Project linking has already been configured. Create the directories C:\OpenGL\lib and C:\OpenGL\includes, then place the required library and header files into their respective folders. Additionally replace the user folder with your user in the solution properties.**
+- IDE that is compatible with CMAKE. e.g Visual Studio with C++
+- The Libraries are already attached in the project, and the program can be run through main.cpp
 
 ## Future Improvements
 * GPU compute shader implementation

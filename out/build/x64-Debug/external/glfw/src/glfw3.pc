@@ -1,0 +1,13 @@
+prefix=C:/Users/o1wil/OneDrive/Documents/GitHub/GLFluidSim/out/install/x64-Debug
+exec_prefix=${prefix}
+includedir=C:/Users/o1wil/OneDrive/Documents/GitHub/GLFluidSim/out/install/x64-Debug/include
+libdir=C:/Users/o1wil/OneDrive/Documents/GitHub/GLFluidSim/out/install/x64-Debug/lib
+
+Name: GLFW
+Description: A multi-platform library for OpenGL, window and input
+Version: 3.5.1
+URL: https://www.glfw.org/
+Requires.private: 
+Libs: -L${libdir} -lglfw3
+Libs.private: -lgdi32
+Cflags: -I${includedir}
